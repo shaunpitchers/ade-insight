@@ -7,7 +7,7 @@
           Version="0.1.0"
           Manufacturer="ADE"
           UpgradeCode="PUT-YOUR-BUNDLE-UPGRADECODE-GUID-HERE"
-          IconSourceFile="..\..\src\testreport\gui\assets\adeinsight.ico">
+          IconSourceFile="..\..\src\ade_insight\gui\assets\adeinsight.ico">
 
     <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
       <bal:WixStandardBootstrapperApplication

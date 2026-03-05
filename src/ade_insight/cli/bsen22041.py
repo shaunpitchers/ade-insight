@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import typer
 
-from testreport.standards.bsen22041.runner import run_bsen22041
+from ade_insight.standards.bsen22041.runner import run_bsen22041
 
 app = typer.Typer(help="BS EN 22041 tools")
 

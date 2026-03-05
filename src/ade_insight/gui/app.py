@@ -37,11 +37,11 @@ from PySide6.QtWidgets import (
 )
 
 # parsing temp only for "load columns" helper
-from testreport.io.temp_csv import parse_temp_rh_csv
+from ade_insight.io.temp_csv import parse_temp_rh_csv
 
 # runner
-from testreport.standards.bsen22041.runner import run_bsen22041
-from testreport.core.products import PRODUCTS
+from ade_insight.standards.bsen22041.runner import run_bsen22041
+from ade_insight.core.products import PRODUCTS
 
 # Matplotlib viewer (robust)
 from matplotlib.figure import Figure

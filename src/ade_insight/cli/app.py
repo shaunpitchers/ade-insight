@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import typer
 
-from testreport import __version__
-from testreport.io.power_txt import parse_power_txt_si
-from testreport.cli.bsen22041 import app as bsen22041_app
+from ade_insight import __version__
+from ade_insight.io.power_txt import parse_power_txt_si
+from ade_insight.cli.bsen22041 import app as bsen22041_app
 
 app = typer.Typer(help="Test report tool")
 
@@ -34,7 +34,7 @@ def version() -> None:
 
 
 def main() -> None:
-    app(prog_name="testreport")
+    app(prog_name="ade_insight")
 
 
 if __name__ == "__main__":

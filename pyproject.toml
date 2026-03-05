@@ -30,8 +30,8 @@ dev = [
 ]
 
 [project.scripts]
-adeinsight = "testreport.cli.app:main"
-adeinsight-gui = "testreport.gui.app:main"
+adeinsight = "ade_insight.cli.app:main"
+adeinsight-gui = "ade_insight.gui.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -42,3 +42,6 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.setuptools.package-data]
+ade_insight = ["gui/style.qss", "gui/assets/*.png"]

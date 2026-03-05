@@ -15,7 +15,7 @@
     <MediaTemplate />
 
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico"/>
-    <Icon Id="AppIcon.ico" SourceFile="..\..\src\testreport\gui\assets\adeinsight.ico" />
+    <Icon Id="AppIcon.ico" SourceFile="..\..\src\ade_insight\gui\assets\adeinsight.ico" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">

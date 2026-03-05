@@ -1,4 +1,4 @@
-# src/testreport/core/align_bsen22041.py
+# src/ade_insight/core/align_bsen22041.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,9 +34,7 @@ class AlignQC:
     warnings: list[str]
 
 
-def _ensure_time_sorted_unique(
-    df: pd.DataFrame, time_col: str = "time"
-) -> pd.DataFrame:
+def _ensure_time_sorted_unique(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
     if time_col not in df.columns:
         raise ValueError(f"Missing required column '{time_col}'")
 
@@ -51,15 +49,9 @@ def _ensure_time_sorted_unique(
 def _build_windows(
     test_start: pd.Timestamp, *, stable_hours: int = 24, test_hours: int = 48
 ) -> list[Window]:
-    stable = Window(
-        "stable_24h", test_start - pd.Timedelta(hours=stable_hours), test_start
-    )
-    test_total = Window(
-        "test_48h", test_start, test_start + pd.Timedelta(hours=test_hours)
-    )
-    test_first = Window(
-        "test_first_24h", test_start, test_start + pd.Timedelta(hours=24)
-    )
+    stable = Window("stable_24h", test_start - pd.Timedelta(hours=stable_hours), test_start)
+    test_total = Window("test_48h", test_start, test_start + pd.Timedelta(hours=test_hours))
+    test_first = Window("test_first_24h", test_start, test_start + pd.Timedelta(hours=24))
     test_last = Window(
         "test_last_24h",
         test_start + pd.Timedelta(hours=24),
@@ -110,12 +102,7 @@ def _reindex_to_grid(
     if df_rs.empty:
         return pd.DataFrame({time_col: grid})
 
-    return (
-        df_rs.set_index(time_col)
-        .reindex(grid)
-        .reset_index()
-        .rename(columns={"index": time_col})
-    )
+    return df_rs.set_index(time_col).reindex(grid).reset_index().rename(columns={"index": time_col})
 
 
 def _missing_frac_all_nan_rows(df: pd.DataFrame, time_col: str = "time") -> float:
@@ -207,12 +194,8 @@ def align_bsen22041_by_test_start(
 
         temp_present[w.name] = _present_rows(t_al, "time")
         power_present[w.name] = _present_rows(p_al, "time")
-        temp_miss[w.name] = (
-            _missing_frac_all_nan_rows(t_al, "time") if len(grid) else 1.0
-        )
-        power_miss[w.name] = (
-            _missing_frac_all_nan_rows(p_al, "time") if len(grid) else 1.0
-        )
+        temp_miss[w.name] = _missing_frac_all_nan_rows(t_al, "time") if len(grid) else 1.0
+        power_miss[w.name] = _missing_frac_all_nan_rows(p_al, "time") if len(grid) else 1.0
 
         if expected_rows[w.name] > 0:
             if temp_miss[w.name] > warn_if_missing_over:
@@ -293,10 +276,7 @@ def export_qc_report(qc: AlignQC, out_path: str | Path) -> Path:
         "resample_seconds": qc.resample_seconds,
         "temp_range": (str(qc.temp_range[0]), str(qc.temp_range[1])),
         "power_range": (str(qc.power_range[0]), str(qc.power_range[1])),
-        "windows": [
-            {"name": w.name, "start": str(w.start), "end": str(w.end)}
-            for w in qc.windows
-        ],
+        "windows": [{"name": w.name, "start": str(w.start), "end": str(w.end)} for w in qc.windows],
         "expected_rows": qc.expected_rows,
         "temp_rows_present": qc.temp_rows_present,
         "power_rows_present": qc.power_rows_present,

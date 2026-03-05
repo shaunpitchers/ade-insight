@@ -9,25 +9,25 @@ from typing import Any
 
 import pandas as pd
 
-from testreport.io.temp_csv import parse_temp_rh_csv
-from testreport.io.power_txt import parse_power_txt_si
-from testreport.core.align_bsen22041 import (
+from ade_insight.io.temp_csv import parse_temp_rh_csv
+from ade_insight.io.power_txt import parse_power_txt_si
+from ade_insight.core.align_bsen22041 import (
     align_bsen22041_by_test_start,
     export_aligned_windows,
     export_qc_report,
 )
-from testreport.core.energy import compute_energy_results
-from testreport.core.ambient_gradient import compute_ambient_gradient
-from testreport.core.plots import (
+from ade_insight.core.energy import compute_energy_results
+from ade_insight.core.ambient_gradient import compute_ambient_gradient
+from ade_insight.core.plots import (
     plot_power,
     plot_voltage_current,
     plot_foodstuff_lines,
     plot_foodstuff_min_max_mean,
     plot_ambient_temps_and_rh,
 )
-from testreport.core.temp_stats import compute_column_stats
+from ade_insight.core.temp_stats import compute_column_stats
 
-from testreport.core.products import (
+from ade_insight.core.products import (
     PRODUCTS,
     classify_cabinet_by_food_mean,
     saec_constants,
