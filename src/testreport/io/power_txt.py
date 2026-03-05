@@ -308,3 +308,51 @@ def parse_power_txt_si(
     df = df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
     df.attrs["skipped_lines"] = skipped
     return df
+
+
+def quick_power_time_bounds(
+    path: str | Path,
+    *,
+    tz: str = "Europe/London",
+    time_offset_seconds: int = 0,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Fast scan for min/max timestamps in a power TXT file.
+
+    Reads the file line-by-line, parsing only the trailing timestamp token.
+    Returns (first_ts, last_ts) as tz-aware timestamps in `tz`.
+    """
+    path = Path(path)
+    first_ts: pd.Timestamp | None = None
+    last_ts: pd.Timestamp | None = None
+
+    in_table = False
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            if (not in_table) and line.startswith("Record_No") and "Time" in line:
+                in_table = True
+                continue
+            if not in_table:
+                continue
+
+            toks = line.split()
+            if len(toks) < 2:
+                continue
+            ts_token = toks[-1]
+            ts = _parse_timestamp(ts_token)
+            if ts is None:
+                continue
+            ts = ts.tz_localize(tz)
+            if time_offset_seconds:
+                ts = ts + pd.Timedelta(seconds=int(time_offset_seconds))
+
+            if first_ts is None:
+                first_ts = ts
+            last_ts = ts
+
+    if first_ts is None or last_ts is None:
+        raise ValueError("Could not parse any timestamps from power file.")
+
+    return first_ts, last_ts

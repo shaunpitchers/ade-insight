@@ -15,16 +15,13 @@ def align(
     test_start: str = typer.Option(
         ..., "--test-start", help="Door-opening start time (local clock)"
     ),
+    product_name: str | None = typer.Option(None, "--product"),
     out_dir: Path = typer.Option(Path("out/inspect")),
     tz: str = typer.Option("Europe/London"),
     resample_seconds: int = typer.Option(10),
     prefix: str = typer.Option("aligned"),
-    compressor_on_threshold_w: float = typer.Option(
-        50.0, "--compressor-on-threshold-w"
-    ),
-    coverage_max_missing_percent: float = typer.Option(
-        0.5, "--coverage-max-missing-percent"
-    ),
+    compressor_on_threshold_w: float = typer.Option(50.0, "--compressor-on-threshold-w"),
+    coverage_max_missing_percent: float = typer.Option(0.5, "--coverage-max-missing-percent"),
     ta_col: str | None = typer.Option(None, "--ta-col"),
     ground_col: str | None = typer.Option(None, "--ground-col"),
     ceiling_col: str | None = typer.Option(None, "--ceiling-col"),
@@ -36,6 +33,7 @@ def align(
         power_file=power_file,
         test_start=test_start,
         out_dir=out_dir,
+        product_name=product_name,
         tz=tz,
         resample_seconds=resample_seconds,
         prefix=prefix,

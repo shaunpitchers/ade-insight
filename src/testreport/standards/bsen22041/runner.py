@@ -5,6 +5,7 @@ from pathlib import Path
 import datetime as dt
 import json
 from typing import Any
+import csv
 
 import pandas as pd
 
@@ -25,6 +26,12 @@ from testreport.core.plots import (
     plot_ambient_temps_and_rh,
 )
 from testreport.core.temp_stats import compute_column_stats
+from testreport.core.products import (
+    PRODUCTS,
+    classify_cabinet_by_food_mean,
+    saec_constants,
+    compute_energy_label,
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +141,7 @@ def run_bsen22041(
     prefix: str = "aligned",
     compressor_on_threshold_w: float = 50.0,
     coverage_max_missing_percent: float = 0.5,
+    product_name: str | None = None,
     ta_col: str | None = None,
     ground_col: str | None = None,
     ceiling_col: str | None = None,
@@ -228,9 +236,7 @@ def run_bsen22041(
     (results_dir / "power_results.json").write_text(
         json.dumps(power_results.__dict__, indent=2), encoding="utf-8"
     )
-    pd.DataFrame([power_results.__dict__]).to_csv(
-        results_dir / "power_results.csv", index=False
-    )
+    pd.DataFrame([power_results.__dict__]).to_csv(results_dir / "power_results.csv", index=False)
 
     power_plot = plot_power(p_last, results_dir, prefix="test_last_24h")
     vc_paths = plot_voltage_current(p_last, results_dir, prefix="test_last_24h")
@@ -240,9 +246,7 @@ def run_bsen22041(
     t_last = temp_w.get("test_last_24h")
     t_test48 = temp_w.get("test_48h")
     if t_stable is None or t_last is None or t_test48 is None:
-        raise RuntimeError(
-            "Missing one or more temp windows: stable_24h, test_last_24h, test_48h"
-        )
+        raise RuntimeError("Missing one or more temp windows: stable_24h, test_last_24h, test_48h")
 
     food_cols = _detect_food_cols(t_stable, n=8)
 
@@ -279,9 +283,7 @@ def run_bsen22041(
             results_dir / "foodstuff_stats_test_last_24h.csv", index=False
         )
     else:
-        warnings.append(
-            "Could not detect foodstuff columns '1'..'8' in aligned temp data."
-        )
+        warnings.append("Could not detect foodstuff columns '1'..'8' in aligned temp data.")
 
     # Ambient plot + gradient
     ta, g, c, rh = _detect_ambient_columns(
@@ -332,6 +334,83 @@ def run_bsen22041(
         "test_last_24h": _temp_summary(t_last, food_cols),
     }
 
+    # -------- Product / SAEC / EEI / Label --------
+    product_payload = None
+
+    # Mean food temp from test_last_24h summary (robust + matches your logic)
+    food_mean_c = None
+    try:
+        food_mean_c = temp_summary["test_last_24h"]["overall"]["mean"]
+    except Exception:
+        food_mean_c = None
+
+    cabinet_class = classify_cabinet_by_food_mean(food_mean_c)
+
+    if product_name and product_name in PRODUCTS and cabinet_class:
+        spec = PRODUCTS[product_name]
+
+        # Only compute if volume is set sensibly
+        if spec.net_volume_l and spec.net_volume_l > 0:
+            M, N = saec_constants(cabinet_class)
+            saec = M * float(spec.net_volume_l) + N  # (your units)
+            aec = float(power_results.kwh_per_day) * 365.0
+            eei = (aec / saec) * 100.0 if saec > 0 else float("nan")
+            label = compute_energy_label(eei) if eei == eei else None
+
+            product_payload = {
+                "name": spec.name,
+                "width_mm": spec.width_mm,
+                "depth_mm": spec.depth_mm,
+                "height_mm": spec.height_mm,
+                "net_volume_l": float(spec.net_volume_l),
+                "food_mean_c": float(food_mean_c) if food_mean_c is not None else None,
+                "cabinet_class": cabinet_class,  # "fridge" / "freezer"
+                "M": float(M),
+                "N": float(N),
+                "SAEC": float(saec),
+                "AEC": float(aec),
+                "EEI_percent": float(eei),
+                "label": label,
+            }
+        else:
+            product_payload = {
+                "name": spec.name,
+                "width_mm": spec.width_mm,
+                "depth_mm": spec.depth_mm,
+                "height_mm": spec.height_mm,
+                "net_volume_l": float(spec.net_volume_l),
+                "food_mean_c": float(food_mean_c) if food_mean_c is not None else None,
+                "cabinet_class": cabinet_class,
+                "warning": "Product volume not set (>0 required) so SAEC/EEI not computed.",
+            }
+
+    # Write Energy Label CSV (single-row table)
+    try:
+        if (
+            product_payload
+            and "warning" not in product_payload
+            and product_payload.get("label") is not None
+        ):
+            csv_path = results_dir / "energy_label.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(
+                    ["AEC_kWh_per_year", "Volume_L", "M", "N", "SAEC", "EEI_percent", "Label"]
+                )
+                w.writerow(
+                    [
+                        f"{float(product_payload['AEC']):.3f}",
+                        f"{float(product_payload['net_volume_l']):.3f}",
+                        f"{float(product_payload['M']):.3f}",
+                        f"{float(product_payload['N']):.3f}",
+                        f"{float(product_payload['SAEC']):.3f}",
+                        f"{float(product_payload['EEI_percent']):.3f}",
+                        str(product_payload["label"]),
+                    ]
+                )
+    except Exception as e:
+        warnings.append(f"Could not write energy_label.csv: {e}")
+
     # Summary for GUI
     summary: dict[str, Any] = {
         "software_name": "ADE Insight",
@@ -342,6 +421,7 @@ def run_bsen22041(
         "power_results": power_results.__dict__,
         "temp_summary": temp_summary,
         "ambient_gradient": gradient_payload,
+        "product": product_payload,
         "coverage_missing_frac": {
             "temp": qc.temp_missing_frac,
             "power": qc.power_missing_frac,
@@ -361,12 +441,8 @@ def run_bsen22041(
         "voltage": str(vc_paths.get("voltage")) if vc_paths.get("voltage") else None,
         "current": str(vc_paths.get("current")) if vc_paths.get("current") else None,
         "ambient": ambient_plot_path,
-        "food_stable": str(results_dir / "foodstuff_stable_24h.png")
-        if food_cols
-        else None,
-        "food_last": str(results_dir / "foodstuff_test_last_24h.png")
-        if food_cols
-        else None,
+        "food_stable": str(results_dir / "foodstuff_stable_24h.png") if food_cols else None,
+        "food_last": str(results_dir / "foodstuff_test_last_24h.png") if food_cols else None,
         "food_stable_mmm": str(results_dir / "foodstuff_stable_24h_min_max_mean.png")
         if food_cols
         else None,
@@ -376,9 +452,7 @@ def run_bsen22041(
     }
 
     summary_path = results_dir / "summary.json"
-    summary_path.write_text(
-        json.dumps({**summary, "plots": plots}, indent=2), encoding="utf-8"
-    )
+    summary_path.write_text(json.dumps({**summary, "plots": plots}, indent=2), encoding="utf-8")
 
     return Bsen22041RunResult(
         run_dir=run_dir,

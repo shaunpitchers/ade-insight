@@ -141,3 +141,60 @@ def parse_temp_rh_csv(
         warnings=warnings,
     )
     return df, rep
+
+
+def estimate_test_start_from_temp(
+    path: str | Path,
+    *,
+    tz: str = "Europe/London",
+    numeric_time_is_utc: bool = True,
+    time_base: str = "auto",
+    offset_hours: int = 24,
+    read_rows: int = 200,
+) -> pd.Timestamp:
+    """Estimate BS EN 22041 door-opening start time from the temp CSV.
+
+    Simple rule: test_start = first timestamp in file + offset_hours (default 24h).
+
+    Uses a lightweight read of the first `read_rows` rows for speed.
+    Returns a tz-aware Timestamp in `tz`.
+    """
+    path = Path(path)
+    df = pd.read_csv(path, nrows=read_rows)
+    if df.empty:
+        raise ValueError("Temp CSV appears to be empty.")
+
+    time_col = _pick_time_column(df)
+    raw_time = df[time_col]
+
+    mode = time_base.lower().strip()
+    if mode not in {"auto", "excel_days", "datetime"}:
+        raise ValueError("time_base must be one of: auto, excel_days, datetime")
+
+    use_excel = False
+    if mode == "excel_days":
+        use_excel = True
+    elif mode == "datetime":
+        use_excel = False
+    else:
+        use_excel = _looks_like_excel_days(raw_time)
+
+    if use_excel:
+        dt_s = _excel_days_to_datetime(raw_time, as_utc=numeric_time_is_utc)
+        if numeric_time_is_utc:
+            dt_s = dt_s.dt.tz_convert(tz)
+        else:
+            dt_s = dt_s.dt.tz_localize(tz)
+    else:
+        dt_s = pd.to_datetime(raw_time, errors="coerce")
+        if dt_s.dt.tz is None:
+            dt_s = dt_s.dt.tz_localize(tz)
+        else:
+            dt_s = dt_s.dt.tz_convert(tz)
+
+    dt_s = dt_s.dropna()
+    if dt_s.empty:
+        raise ValueError("Could not parse any timestamps from the Temp CSV.")
+
+    first = dt_s.min()
+    return first + pd.Timedelta(hours=offset_hours)

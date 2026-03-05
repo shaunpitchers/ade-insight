@@ -6,6 +6,62 @@ from typing import Sequence, Optional
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from .plot_style import apply_default_rcparams, finalize_and_save, place_legend_below
+import numpy as np
+
+
+def _set_rh_ylim(ax, rh_series):
+    """Set RH axis to mean ±10%, clipped to 0–100."""
+
+    rh = pd.to_numeric(rh_series, errors="coerce").dropna()
+    if rh.empty:
+        ax.set_ylim(0, 100)
+        return
+
+    mean_rh = rh.mean()
+
+    lower = max(0, mean_rh - 10)
+    upper = min(100, mean_rh + 10)
+
+    if lower == upper:
+        lower = max(0, mean_rh - 5)
+        upper = min(100, mean_rh + 5)
+
+    ax.set_ylim(lower, upper)
+
+
+def _set_padded_ylim(ax, series_list, pad_frac: float = 0.08, min_pad: float = 1.0) -> None:
+    vals = pd.concat([pd.to_numeric(s, errors="coerce") for s in series_list], axis=0).dropna()
+    if vals.empty:
+        return
+    vmin, vmax = float(vals.min()), float(vals.max())
+    if vmin == vmax:
+        pad = max(min_pad, abs(vmin) * pad_frac)
+        ax.set_ylim(vmin - pad, vmax + pad)
+        return
+    span = vmax - vmin
+    pad = max(min_pad, span * pad_frac)
+    ax.set_ylim(vmin - pad, vmax + pad)
+
+
+def _despike_series(y: pd.Series, *, k: float = 8.0) -> pd.Series:
+    """
+    Remove occasional high spikes (e.g., startup current captured at 10s sampling).
+    Robust rule using MAD around median. Spikes are replaced with NaN (line breaks).
+    """
+    y_num = pd.to_numeric(y, errors="coerce").astype(float)
+
+    med = np.nanmedian(y_num)
+    mad = np.nanmedian(np.abs(y_num - med))
+
+    # If MAD is zero (flat series), do nothing.
+    if not np.isfinite(mad) or mad == 0:
+        return y_num
+
+    thresh = med + k * mad
+    y_num = y_num.mask(y_num > thresh)
+    return y_num
+
 
 def _to_time(df: pd.DataFrame) -> pd.Series:
     return pd.to_datetime(df["time"], errors="coerce")
@@ -31,14 +87,16 @@ def plot_power(
         return path
 
     y = pd.to_numeric(df["power_W"], errors="coerce")
-    plt.figure()
-    plt.plot(x, y)
-    plt.xlabel("Time")
-    plt.ylabel("Power (W)")
-    plt.title("Power (W)")
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
+    y = _despike_series(y, k=8.0)
+
+    apply_default_rcparams()
+    fig, ax = plt.subplots()
+    ax.plot(x, y)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Power (W)")
+    # No title
+    fig.autofmt_xdate()
+    finalize_and_save(fig, path)
     return path
 
 
@@ -65,26 +123,26 @@ def plot_voltage_current(
 
     if "voltage_V" in df.columns:
         path = out_dir / f"{prefix}_voltage.png"
-        plt.figure()
-        plt.plot(x, pd.to_numeric(df["voltage_V"], errors="coerce"))
-        plt.xlabel("Time")
-        plt.ylabel("Voltage (V)")
-        plt.title("Voltage (V)")
-        plt.tight_layout()
-        plt.savefig(path, dpi=150)
-        plt.close()
+        apply_default_rcparams()
+        fig, ax = plt.subplots()
+        y = _despike_series(df["voltage_V"], k=8.0)
+        ax.plot(x, y)
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Voltage (V)")
+        fig.autofmt_xdate()
+        finalize_and_save(fig, path)
         created["voltage"] = path
 
     if "current_A" in df.columns:
         path = out_dir / f"{prefix}_current.png"
-        plt.figure()
-        plt.plot(x, pd.to_numeric(df["current_A"], errors="coerce"))
-        plt.xlabel("Time")
-        plt.ylabel("Current (A)")
-        plt.title("Current (A)")
-        plt.tight_layout()
-        plt.savefig(path, dpi=150)
-        plt.close()
+        apply_default_rcparams()
+        fig, ax = plt.subplots()
+        y = _despike_series(df["current_A"], k=8.0)
+        ax.plot(x, y)
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Current (A)")
+        fig.autofmt_xdate()
+        finalize_and_save(fig, path)
         created["current"] = path
 
     return created
@@ -105,21 +163,19 @@ def plot_foodstuff_lines(
 
     x = _to_time(df)
 
-    plt.figure()
+    apply_default_rcparams()
+    fig, ax = plt.subplots()
     for c in food_cols:
         if c not in df.columns:
             continue
         y = pd.to_numeric(df[c], errors="coerce")
-        plt.plot(x, y, label=str(c))
+        ax.plot(x, y, label=str(c))
 
-    plt.xlabel("Time")
-    plt.ylabel("Foodstuff temperature (°C)")
-    plt.title(title)
-    if len(food_cols) > 1:
-        plt.legend(ncol=2, fontsize="small")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Foodstuff temperature (°C)")
+    place_legend_below(ax, ncol=4)
+    fig.autofmt_xdate()
+    finalize_and_save(fig, out_path)
     return out_path
 
 
@@ -147,17 +203,16 @@ def plot_foodstuff_min_max_mean(
     y_max = values.max(axis=1, skipna=True)
     y_mean = values.mean(axis=1, skipna=True)
 
-    plt.figure()
-    plt.plot(x, y_min, label="min")
-    plt.plot(x, y_mean, label="mean")
-    plt.plot(x, y_max, label="max")
-    plt.xlabel("Time")
-    plt.ylabel("Foodstuff temperature (°C)")
-    plt.title(title)
-    plt.legend(fontsize="small")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
+    apply_default_rcparams()
+    fig, ax = plt.subplots()
+    ax.plot(x, y_min, label="min")
+    ax.plot(x, y_mean, label="mean")
+    ax.plot(x, y_max, label="max")
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Foodstuff temperature (°C)")
+    place_legend_below(ax, ncol=3)
+    fig.autofmt_xdate()
+    finalize_and_save(fig, out_path)
     return out_path
 
 
@@ -186,20 +241,35 @@ def plot_ambient_temps_and_rh(
     c = pd.to_numeric(df[ceiling_col], errors="coerce")
     rh = pd.to_numeric(df[rh_col], errors="coerce")
 
+    apply_default_rcparams()
     fig, ax1 = plt.subplots()
-    ax1.plot(x, ta, label="Ta")
-    ax1.plot(x, g, label="Ground")
-    ax1.plot(x, c, label="Ceiling")
+
+    l1 = ax1.plot(x, ta, label="Ta")
+    l2 = ax1.plot(x, g, label="Ground")
+    l3 = ax1.plot(x, c, label="Ceiling")
     ax1.set_xlabel("Time")
     ax1.set_ylabel("Ambient temperature (°C)")
-    ax1.legend(fontsize="small", ncol=3)
+    # Left axis limits from temperature data with padding
+    _set_padded_ylim(ax1, [ta, g, c], pad_frac=0.08, min_pad=0.5)
 
     ax2 = ax1.twinx()
-    ax2.plot(x, rh)
+    l4 = ax2.plot(x, rh, label="RH", color="black")  # fixed to black
     ax2.set_ylabel("Relative humidity (%)")
+    # Right axis: standard RH range keeps it visually separated and consistent
+    _set_rh_ylim(ax2, rh)
 
-    plt.title(title)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    # Combine legends from both axes so RH appears
+    lines = l1 + l2 + l3 + l4
+    labels = [ln.get_label() for ln in lines]
+    ax1.legend(
+        lines,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.30),
+        ncol=4,
+        framealpha=0.9,
+    )
+
+    fig.autofmt_xdate()
+    finalize_and_save(fig, out_path)
     return out_path

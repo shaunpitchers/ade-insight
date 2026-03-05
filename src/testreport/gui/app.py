@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -37,6 +38,7 @@ from testreport.io.temp_csv import parse_temp_rh_csv
 
 # runner
 from testreport.standards.bsen22041.runner import run_bsen22041
+from testreport.core.products import PRODUCTS
 
 # Matplotlib viewer (robust)
 from matplotlib.figure import Figure
@@ -226,6 +228,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ADE Insight — BS EN 22041")
         self.resize(1400, 900)
 
+        # State
+        self._last_run_dir: Path | None = None
+        self._last_summary: dict[str, Any] | None = None
+        self._last_qc: dict[str, Any] | None = None
+
+        # Apply styling early (safe even if qss missing)
         self._apply_stylesheet()
 
         # Inputs
@@ -234,6 +242,19 @@ class MainWindow(QMainWindow):
         self.out_dir = QLineEdit("out/gui")
         self.tz = QLineEdit("Europe/London")
         self.test_start = QLineEdit("2025-10-07 14:00:00")
+
+        # Product selection (kept minimal to avoid crowding)
+        self.product_combo = QComboBox()
+        self.product_combo.addItem("(None)")
+        for name in sorted(PRODUCTS.keys()):
+            self.product_combo.addItem(name)
+
+        self.product_hint = QLabel(
+            "Class auto-selected from mean food temperature: freezer if < -5°C, else fridge.\n"
+            "SAEC = M·V + N (M/N depend on class). EEI = 100·AEC/SAEC."
+        )
+        self.product_hint.setWordWrap(True)
+        self.product_hint.setStyleSheet("color:#555; font-size:10pt;")
 
         # Settings
         self.resample_seconds = QSpinBox()
@@ -261,13 +282,11 @@ class MainWindow(QMainWindow):
         self.combo_ceiling = QComboBox()
         self.combo_rh = QComboBox()
 
-        # Temp stats selector (will remain empty unless summary.json contains temp_summary)
+        # Temp stats selector (requires summary.json contains temp_summary)
         self.temp_stats_window = QComboBox()
         self.temp_stats_window.addItem("Stable 24h", "stable_24h")
         self.temp_stats_window.addItem("Test last 24h", "test_last_24h")
-        self.temp_stats_window.currentIndexChanged.connect(
-            self._refresh_temp_stats_table
-        )
+        self.temp_stats_window.currentIndexChanged.connect(self._refresh_temp_stats_table)
 
         # Buttons
         btn_temp = QPushButton("Browse…")
@@ -327,7 +346,7 @@ class MainWindow(QMainWindow):
         self.summary_text = QTextEdit()
         self.summary_text.setReadOnly(True)
 
-        # QC table (readable + coloured)
+        # QC table
         self.qc_table = QTableWidget(0, 6)
         self.qc_table.setHorizontalHeaderLabels(
             ["Window", "Dataset", "Missing %", "Gate %", "Status", "Notes"]
@@ -335,7 +354,7 @@ class MainWindow(QMainWindow):
         self.qc_table.horizontalHeader().setStretchLastSection(True)
         self.qc_table.setAlternatingRowColors(True)
 
-        # Temp stats table (requires summary["temp_summary"])
+        # Temp stats table
         self.temp_stats_table = QTableWidget(0, 4)
         self.temp_stats_table.setHorizontalHeaderLabels(
             ["Probe", "Min (°C)", "Mean (°C)", "Max (°C)"]
@@ -354,6 +373,19 @@ class MainWindow(QMainWindow):
         self.log = QTextEdit()
         self.log.setReadOnly(True)
 
+        # Energy label table
+        self.energy_table = QTableWidget(1, 7)
+        self.energy_table.setHorizontalHeaderLabels(
+            ["AEC (kWh/yr)", "Volume (L)", "M", "N", "SAEC", "EEI (%)", "Label"]
+        )
+        self.energy_table.horizontalHeader().setStretchLastSection(True)
+        self.energy_table.setAlternatingRowColors(True)
+        self.energy_table.verticalHeader().setVisible(False)
+
+        energy_page = QWidget()
+        energy_layout = QVBoxLayout(energy_page)
+        energy_layout.addWidget(self.energy_table)
+
         # Plot tabs
         self.plots_tabs = QTabWidget()
         self.plots_electrical = PlotBrowser()
@@ -368,6 +400,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(temp_stats_page, "Temp stats")
         self.tabs.addTab(self.plots_tabs, "Plots")
         self.tabs.addTab(self.log, "Logs")
+        self.tabs.addTab(energy_page, "Energy Label")
 
         # Layout
         root = QWidget()
@@ -398,6 +431,8 @@ class MainWindow(QMainWindow):
 
         file_form.addRow("Test start (local):", self.test_start)
         file_form.addRow("Timezone:", self.tz)
+        file_form.addRow("Product:", self.product_combo)
+        file_form.addRow("", self.product_hint)
         left.addWidget(file_box)
 
         settings_box = QGroupBox("Settings")
@@ -427,10 +462,6 @@ class MainWindow(QMainWindow):
         left.addLayout(btn_row)
 
         main.addWidget(self.tabs, 2)
-
-        self._last_run_dir: Path | None = None
-        self._last_summary: dict[str, Any] | None = None
-        self._last_qc: dict[str, Any] | None = None
 
     # ---------------------------
     # Styling / logo
@@ -561,9 +592,7 @@ class MainWindow(QMainWindow):
                 for w in rep.warnings:
                     self.log_line(f"- {w}")
 
-            QMessageBox.information(
-                self, "Columns loaded", "Column dropdowns populated."
-            )
+            QMessageBox.information(self, "Columns loaded", "Column dropdowns populated.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load columns:\n{e}")
             self.log_line(f"ERROR loading columns: {e}")
@@ -573,16 +602,13 @@ class MainWindow(QMainWindow):
             dlg = MatplotlibImageDialog(title, path)
             dlg.exec()
         except Exception as e:
-            QMessageBox.critical(
-                self, "Plot viewer error", f"Failed to open plot:\n{e}"
-            )
+            QMessageBox.critical(self, "Plot viewer error", f"Failed to open plot:\n{e}")
             self.log_line(f"Plot viewer ERROR ({path}): {e}")
 
     # ---------------------------
-    # QC helpers (colour + rows)
+    # QC helpers
     # ---------------------------
     def _set_row_color(self, row: int, status: str) -> None:
-        # subtle but obvious
         if status == "PASS":
             bg = Qt.green
             fg = Qt.black
@@ -685,7 +711,7 @@ class MainWindow(QMainWindow):
             lines.append("")
 
         warns = summary.get("warnings", {}) or {}
-        qc_warns = []
+        qc_warns: list[str] = []
         if isinstance(warns, dict):
             qc_warns = warns.get("qc", []) or []
         if qc_warns:
@@ -701,7 +727,6 @@ class MainWindow(QMainWindow):
     ) -> None:
         self.qc_table.setRowCount(0)
 
-        # Prefer summary coverage; fallback to qc json
         temp_missing: dict[str, float] = {}
         power_missing: dict[str, float] = {}
 
@@ -720,10 +745,9 @@ class MainWindow(QMainWindow):
         gate_percent = float(self.coverage_max_missing_percent.value())
         gate_frac = gate_percent / 100.0
 
-        # Policy
         required_temp = {"stable_24h", "test_48h", "test_first_24h", "test_last_24h"}
         required_power = {"test_last_24h"}
-        warn_power = {"test_48h", "test_first_24h"}  # warn-only if present/over gate
+        warn_power = {"test_48h", "test_first_24h"}
 
         windows = sorted(
             set(temp_missing.keys())
@@ -737,20 +761,11 @@ class MainWindow(QMainWindow):
             t = temp_missing.get(w, None)
             if w in required_temp:
                 if t is None:
-                    self._qc_add_row(
-                        w,
-                        "Temp",
-                        None,
-                        gate_percent,
-                        "FAIL",
-                        "Missing window or no data",
-                    )
+                    self._qc_add_row(w, "Temp", None, gate_percent, "FAIL", "Missing window or no data")
                 elif t <= gate_frac:
                     self._qc_add_row(w, "Temp", t, gate_percent, "PASS", "")
                 else:
-                    self._qc_add_row(
-                        w, "Temp", t, gate_percent, "FAIL", "Over coverage gate"
-                    )
+                    self._qc_add_row(w, "Temp", t, gate_percent, "FAIL", "Over coverage gate")
             else:
                 if t is not None:
                     self._qc_add_row(w, "Temp", t, gate_percent, "PASS", "Info")
@@ -759,38 +774,19 @@ class MainWindow(QMainWindow):
             p = power_missing.get(w, None)
             if w in required_power:
                 if p is None:
-                    self._qc_add_row(
-                        w,
-                        "Power",
-                        None,
-                        gate_percent,
-                        "FAIL",
-                        "Missing window or no data",
-                    )
+                    self._qc_add_row(w, "Power", None, gate_percent, "FAIL", "Missing window or no data")
                 elif p <= gate_frac:
                     self._qc_add_row(w, "Power", p, gate_percent, "PASS", "")
                 else:
-                    self._qc_add_row(
-                        w, "Power", p, gate_percent, "FAIL", "Over coverage gate"
-                    )
+                    self._qc_add_row(w, "Power", p, gate_percent, "FAIL", "Over coverage gate")
             elif w in warn_power:
                 if p is None:
-                    self._qc_add_row(
-                        w,
-                        "Power",
-                        None,
-                        gate_percent,
-                        "WARN",
-                        "No data for this window",
-                    )
+                    self._qc_add_row(w, "Power", None, gate_percent, "WARN", "No data for this window")
                 elif p <= gate_frac:
                     self._qc_add_row(w, "Power", p, gate_percent, "PASS", "")
                 else:
-                    self._qc_add_row(
-                        w, "Power", p, gate_percent, "WARN", "Over gate (warn-only)"
-                    )
+                    self._qc_add_row(w, "Power", p, gate_percent, "WARN", "Over gate (warn-only)")
             else:
-                # stable_24h power is irrelevant; show only if present
                 if p is not None:
                     status = "PASS" if p <= gate_frac else "WARN"
                     note = "Info" if status == "PASS" else "Over gate (info)"
@@ -800,7 +796,6 @@ class MainWindow(QMainWindow):
         self.qc_table.horizontalHeader().setStretchLastSection(True)
 
     def _refresh_temp_stats_table(self) -> None:
-        # Uses summary payload if runner includes it; otherwise stays blank.
         if not self._last_summary:
             self.temp_stats_table.setRowCount(0)
             return
@@ -808,33 +803,16 @@ class MainWindow(QMainWindow):
         win = self.temp_stats_window.currentData()
         ts = self._last_summary.get("temp_summary", {})
         win_payload = ts.get(win, {})
-        per_probe = (
-            win_payload.get("per_probe", {}) if isinstance(win_payload, dict) else {}
-        )
+        per_probe = win_payload.get("per_probe", {}) if isinstance(win_payload, dict) else {}
 
         probes = sorted(per_probe.keys(), key=lambda x: (len(x), x))
         self.temp_stats_table.setRowCount(len(probes))
         for r, probe in enumerate(probes):
             stats = per_probe.get(probe, {})
             _set_item(self.temp_stats_table, r, 0, str(probe))
-            _set_item(
-                self.temp_stats_table,
-                r,
-                1,
-                f"{float(stats.get('min', float('nan'))):.2f}",
-            )
-            _set_item(
-                self.temp_stats_table,
-                r,
-                2,
-                f"{float(stats.get('mean', float('nan'))):.2f}",
-            )
-            _set_item(
-                self.temp_stats_table,
-                r,
-                3,
-                f"{float(stats.get('max', float('nan'))):.2f}",
-            )
+            _set_item(self.temp_stats_table, r, 1, f"{float(stats.get('min', float('nan'))):.2f}")
+            _set_item(self.temp_stats_table, r, 2, f"{float(stats.get('mean', float('nan'))):.2f}")
+            _set_item(self.temp_stats_table, r, 3, f"{float(stats.get('max', float('nan'))):.2f}")
         self.temp_stats_table.resizeColumnsToContents()
 
     def _update_plot_tabs(self, plots: dict[str, str | None]) -> None:
@@ -856,6 +834,38 @@ class MainWindow(QMainWindow):
         self.plots_food.set_plots(build(food_keys), self._open_plot_viewer)
         self.plots_ambient.set_plots(build(ambient_keys), self._open_plot_viewer)
 
+    def _fmt3(self, v: object) -> str:
+        try:
+            if v is None:
+                return ""
+            x = float(v)
+            if x != x:  # NaN
+                return ""
+            return f"{x:.3f}"
+        except Exception:
+            return ""
+
+    def _refresh_energy_label_table(self) -> None:
+        # Clear row
+        for c in range(self.energy_table.columnCount()):
+            _set_item(self.energy_table, 0, c, "")
+
+        if not self._last_summary:
+            return
+
+        prod = self._last_summary.get("product")
+        if not isinstance(prod, dict) or not prod or "warning" in prod:
+            return
+
+        _set_item(self.energy_table, 0, 0, self._fmt3(prod.get("AEC")))
+        _set_item(self.energy_table, 0, 1, self._fmt3(prod.get("net_volume_l")))
+        _set_item(self.energy_table, 0, 2, self._fmt3(prod.get("M")))
+        _set_item(self.energy_table, 0, 3, self._fmt3(prod.get("N")))
+        _set_item(self.energy_table, 0, 4, self._fmt3(prod.get("SAEC")))
+        _set_item(self.energy_table, 0, 5, self._fmt3(prod.get("EEI_percent")))
+        _set_item(self.energy_table, 0, 6, str(prod.get("label") or ""))
+        self.energy_table.resizeColumnsToContents()
+
     # ---------------------------
     # Run
     # ---------------------------
@@ -867,31 +877,19 @@ class MainWindow(QMainWindow):
         tz = self.tz.text().strip()
 
         if not temp or not Path(temp).exists():
-            QMessageBox.critical(
-                self, "Missing input", "Please select a valid Temp/RH CSV file."
-            )
+            QMessageBox.critical(self, "Missing input", "Please select a valid Temp/RH CSV file.")
             return
         if not power or not Path(power).exists():
-            QMessageBox.critical(
-                self, "Missing input", "Please select a valid Power TXT file."
-            )
+            QMessageBox.critical(self, "Missing input", "Please select a valid Power TXT file.")
             return
         if not out_dir:
-            QMessageBox.critical(
-                self, "Missing output", "Please specify an output directory."
-            )
+            QMessageBox.critical(self, "Missing output", "Please specify an output directory.")
             return
         if not test_start:
-            QMessageBox.critical(
-                self, "Missing test start", "Please enter test start time."
-            )
+            QMessageBox.critical(self, "Missing test start", "Please enter test start time.")
             return
         if not tz:
-            QMessageBox.critical(
-                self,
-                "Missing timezone",
-                "Please enter a timezone (e.g. Europe/London).",
-            )
+            QMessageBox.critical(self, "Missing timezone", "Please enter a timezone (e.g. Europe/London).")
             return
 
         # Reset UI
@@ -905,6 +903,7 @@ class MainWindow(QMainWindow):
         self.plots_food.clear()
         self.plots_ambient.clear()
 
+        # Focus logs
         self.tabs.setCurrentIndex(4)
 
         overrides = {
@@ -916,7 +915,13 @@ class MainWindow(QMainWindow):
 
         try:
             self.log_line("Running BS EN 22041 pipeline…")
-            result = run_bsen22041(
+
+            product_name = None
+            sel = self.product_combo.currentText().strip()
+            if sel and sel != "(None)":
+                product_name = sel
+
+            kwargs: dict[str, Any] = dict(
                 temp_file=Path(temp),
                 power_file=Path(power),
                 test_start=test_start,
@@ -924,43 +929,41 @@ class MainWindow(QMainWindow):
                 tz=tz,
                 resample_seconds=int(self.resample_seconds.value()),
                 compressor_on_threshold_w=float(self.compressor_threshold.value()),
-                coverage_max_missing_percent=float(
-                    self.coverage_max_missing_percent.value()
-                ),
+                coverage_max_missing_percent=float(self.coverage_max_missing_percent.value()),
                 probe_distance_m=float(self.probe_distance_m.value()),
                 **overrides,
             )
 
+            # Backwards compatible: only pass product_name if runner supports it
+            try:
+                sig = inspect.signature(run_bsen22041)
+                if "product_name" in sig.parameters:
+                    kwargs["product_name"] = product_name
+            except Exception:
+                pass
+
+            result = run_bsen22041(**kwargs)
             run_dir = Path(result.run_dir)
             self._last_run_dir = run_dir
 
             # Load outputs from disk (robust)
             summary, qc = self._load_run_outputs(run_dir)
-            self._last_summary = (
-                summary if summary else (getattr(result, "summary", None) or None)
-            )
+            self._last_summary = summary if summary else (getattr(result, "summary", None) or None)
             self._last_qc = qc
 
             # Plots: prefer result.plots, fallback summary["plots"]
             plots = getattr(result, "plots", None)
-            if (
-                not plots
-                and self._last_summary
-                and isinstance(self._last_summary.get("plots"), dict)
-            ):
+            if not plots and self._last_summary and isinstance(self._last_summary.get("plots"), dict):
                 plots = self._last_summary["plots"]
             if isinstance(plots, dict):
                 self._update_plot_tabs(plots)
 
             # Summary
             if self._last_summary and isinstance(self._last_summary, dict):
-                self.summary_text.setPlainText(
-                    self._format_summary_text(self._last_summary)
-                )
+                self.summary_text.setPlainText(self._format_summary_text(self._last_summary))
+                self._refresh_energy_label_table()
             else:
-                self.summary_text.setPlainText(
-                    f"Run completed. Output: {run_dir}\n(No summary.json found)"
-                )
+                self.summary_text.setPlainText(f"Run completed. Output: {run_dir}\n(No summary.json found)")
 
             # QC
             self._populate_qc_table(
@@ -970,9 +973,7 @@ class MainWindow(QMainWindow):
 
             # Logs
             self.log_line(f"Output directory: {run_dir}")
-            if self._last_summary and isinstance(
-                self._last_summary.get("warnings"), dict
-            ):
+            if self._last_summary and isinstance(self._last_summary.get("warnings"), dict):
                 warns = self._last_summary["warnings"]
                 tpw = warns.get("temp_parse", []) or []
                 qcw = warns.get("qc", []) or []
