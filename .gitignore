@@ -7,6 +7,9 @@ artifacts/
 dist/
 pip-wheel-metadata/
 *.whl
+.pyi_build/
+*.spec.bak
+*.log
 
 # Python cache
 __pycache__/
