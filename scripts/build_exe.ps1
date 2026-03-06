@@ -19,11 +19,13 @@ if (-not (Test-Path $VenvDir)) {
 . (Join-Path $VenvDir "Scripts\Activate.ps1")
 
 python -m pip install --upgrade pip
-pip install -e ".[dev,gui]"
-pip install --upgrade pyinstaller
+python -m pip install -e ".[dev,gui]"
+python -m pip install --upgrade pyinstaller
 
 if (-not (Test-Path $Spec)) { Die "PyInstaller spec not found: $Spec" }
-
-pyinstaller --noconfirm --clean $Spec
+python -m PyInstaller --noconfirm --clean --workpath .pyi_build --distpath dist $Spec
+if ($LASTEXITCODE -ne 0) {
+  Die "PyInstaller build failed."
+}
 
 Write-Host "Build complete. See dist/"

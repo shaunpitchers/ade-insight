@@ -1,18 +1,13 @@
-# build/pyinstaller/adeinsight.spec
 from PyInstaller.utils.hooks import (
     collect_submodules,
     collect_data_files,
     collect_dynamic_libs,
-    collect_data_files,
 )
 
 block_cipher = None
 
-# Collect Qt (PySide6) runtime bits explicitly (key reliability boost)
 pyside6_datas = collect_data_files("PySide6")
 pyside6_bins = collect_dynamic_libs("PySide6")
-
-# Optional: matplotlib runtime data (fonts, mpl-data) if you see missing-resource issues
 mpl_datas = collect_data_files("matplotlib")
 
 hiddenimports = (
@@ -22,16 +17,16 @@ hiddenimports = (
 )
 
 a = Analysis(
-    ["build/pyinstaller/run_gui.py"],
-    pathex=["."],
+    ["run_gui.py"],
+    pathex=[".", "../.."],
     binaries=[
         *pyside6_bins,
     ],
     datas=[
-        ("src/ade_insight/gui/style.qss", "ade_insight/gui"),
-        ("src/ade_insight/gui/assets", "ade_insight/gui/assets"),
+        ("../../src/ade_insight/gui/style.qss", "ade_insight/gui"),
+        ("../../src/ade_insight/gui/assets", "ade_insight/gui/assets"),
         *pyside6_datas,
-        *mpl_datas,   # optional; remove if you want smaller builds
+        *mpl_datas,
     ],
     hiddenimports=hiddenimports,
 )
