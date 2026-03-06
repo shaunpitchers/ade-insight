@@ -40,6 +40,7 @@ exe = EXE(
     exclude_binaries=True,
     name="ade-insight",
     console=False,
+    icon="../../src/ade_insight/gui/assets/adande_logo.ico",
 )
 
 coll = COLLECT(

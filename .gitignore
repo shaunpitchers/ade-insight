@@ -5,6 +5,7 @@ artifacts/
 # Python build / packaging
 *.egg-info/
 dist/
+dist-installer/
 pip-wheel-metadata/
 *.whl
 .pyi_build/

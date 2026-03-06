@@ -3,20 +3,19 @@
      xmlns:bal="http://schemas.microsoft.com/wix/BalExtension"
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
-  <Bundle Name="ADE Insight"
-          Version="0.1.0"
-          Manufacturer="ADE"
-          UpgradeCode="PUT-YOUR-BUNDLE-UPGRADECODE-GUID-HERE"
-          IconSourceFile="..\..\src\ade_insight\gui\assets\adeinsight.ico">
+  <Bundle
+      Name="ADE Insight"
+      Version="0.2.0"
+      Manufacturer="ADE"
+      UpgradeCode="{4df6f4b4-278d-4b83-8553-ae5e456866a0}"
+      IconSourceFile="src\ade_insight\gui\assets\adande_logo.ico">
 
     <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
       <bal:WixStandardBootstrapperApplication
-        LicenseFile="installer\wix3\LICENSE.rtf"
-        Theme="hyperlinkLicense" />
+          LicenseFile="build\installer\wix3\LICENSE.rtf" />
     </BootstrapperApplicationRef>
 
-    <!-- Detect VC++ 2015-2022 x64 runtime (common detect key).
-         If you prefer, we can tighten this based on exact runtime version requirements. -->
+    <!-- Detect VC++ 2015-2022 x64 runtime -->
     <util:RegistrySearch
         Id="VCRedistInstalled"
         Root="HKLM"
@@ -26,21 +25,20 @@
         Result="value" />
 
     <Chain>
-      <!-- VC++ Redistributable -->
       <ExePackage
           Id="VCRedistX64"
           DisplayName="Microsoft Visual C++ 2015-2022 Redistributable (x64)"
-          SourceFile="installer\wix3\vc_redist.x64.exe"
+          SourceFile="build\installer\wix3\vc_redist.x64.exe"
           Cache="yes"
           Compressed="yes"
           PerMachine="yes"
+          Permanent="yes"
           Vital="yes"
           InstallCommand="/install /quiet /norestart"
           RepairCommand="/repair /quiet /norestart"
           UninstallCommand="/uninstall /quiet /norestart"
           DetectCondition="VCRedistInstalled = 1" />
 
-      <!-- Your MSI -->
       <MsiPackage
           Id="ADEInsightMSI"
           SourceFile="dist-installer\ADE_Insight.msi"
@@ -52,4 +50,3 @@
 
   </Bundle>
 </Wix>
-
