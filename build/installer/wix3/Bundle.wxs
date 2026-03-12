@@ -41,7 +41,7 @@
 
       <MsiPackage
           Id="ADEInsightMSI"
-          SourceFile="dist-installer\ADE_Insight.msi"
+          SourceFile="dist-installer\ade_insight.msi"
           DisplayName="ADE Insight"
           Visible="no"
           Vital="yes"

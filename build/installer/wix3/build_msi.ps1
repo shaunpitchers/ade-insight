@@ -46,7 +46,7 @@ candle -nologo `
   "$Wix\Product.wxs" `
   "$HarvestWxs"
 
-$MsiPath = Join-Path $OutDir "ADE_Insight.msi"
+$MsiPath = Join-Path $OutDir "ade_insight.msi"
 light -nologo -ext WixUIExtension `
   -out "$MsiPath" `
   "$OutDir\Product.wixobj" `

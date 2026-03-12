@@ -45,7 +45,7 @@ adeinsight --help
 ### Install from released artifacts
 
 Use one of the provided release artifacts: - `ADEInsightSetup.exe`
-(bootstrapper) - or `ADE_Insight.msi`
+(bootstrapper) - or `ade_insight.msi`
 
 Install by double-clicking the installer.
 

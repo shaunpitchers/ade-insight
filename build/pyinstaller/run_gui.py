@@ -1,4 +1,5 @@
 import matplotlib
+
 matplotlib.use("QtAgg")
 
 from ade_insight.gui.app import main
