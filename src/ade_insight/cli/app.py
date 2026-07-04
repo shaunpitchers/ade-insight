@@ -6,10 +6,14 @@ import typer
 from ade_insight import __version__
 from ade_insight.io.power_txt import parse_power_txt_si
 from ade_insight.cli.bsen22041 import app as bsen22041_app
+from ade_insight.cli.electrical import app as electrical_app
+from ade_insight.cli.temperature import app as temperature_app
 
 app = typer.Typer(help="Test report tool")
 
 app.add_typer(bsen22041_app, name="bsen22041")
+app.add_typer(temperature_app, name="temperature")
+app.add_typer(electrical_app, name="electrical")
 
 
 @app.command("parse-power")
