@@ -41,6 +41,8 @@ from ade_insight.io.temp_csv import parse_temp_rh_csv
 
 # runner
 from ade_insight.standards.bsen22041.runner import run_bsen22041
+from ade_insight.analysis.electrical import analyse_electrical
+from ade_insight.analysis.temperature import analyse_temperature
 from ade_insight.core.products import PRODUCTS
 
 # Matplotlib viewer (robust)
@@ -264,6 +266,12 @@ class MainWindow(QMainWindow):
         self.test_start = QLineEdit("2025-10-07 14:00:00")
         self._test_start_user_set = False
 
+        self.analysis_mode = QComboBox()
+        self.analysis_mode.addItem("BS EN 22041", "bsen22041")
+        self.analysis_mode.addItem("Temperature only", "temperature")
+        self.analysis_mode.addItem("Electrical only", "electrical")
+        self.analysis_mode.currentIndexChanged.connect(self._on_analysis_mode_changed)
+
         # If user types in test start, don’t overwrite it again
         self.test_start.textEdited.connect(lambda _t: setattr(self, "_test_start_user_set", True))
 
@@ -447,6 +455,7 @@ class MainWindow(QMainWindow):
 
         file_box = QGroupBox("Inputs")
         file_form = QFormLayout(file_box)
+        file_form.addRow("Analysis mode:", self.analysis_mode)
 
         temp_row = QHBoxLayout()
         temp_row.addWidget(self.temp_path, 1)
@@ -496,6 +505,36 @@ class MainWindow(QMainWindow):
         left.addLayout(btn_row)
 
         main.addWidget(self.tabs, 2)
+        self._on_analysis_mode_changed()
+
+    def _on_analysis_mode_changed(self) -> None:
+        mode = self.analysis_mode.currentData() or "bsen22041"
+        is_bsen = mode == "bsen22041"
+        is_temp = mode == "temperature"
+        is_electrical = mode == "electrical"
+
+        self.temp_path.setEnabled(is_bsen or is_temp)
+        self.power_path.setEnabled(is_bsen or is_electrical)
+        self.test_start.setEnabled(is_bsen)
+        self.product_combo.setEnabled(is_bsen)
+        self.resample_seconds.setEnabled(is_bsen or is_electrical)
+        self.compressor_threshold.setEnabled(is_bsen or is_electrical)
+        self.coverage_max_missing_percent.setEnabled(is_bsen)
+        self.probe_distance_m.setEnabled(is_bsen)
+        for combo in (self.combo_ta, self.combo_ground, self.combo_ceiling, self.combo_rh):
+            combo.setEnabled(is_bsen or is_temp)
+
+        if is_bsen:
+            self.setWindowTitle("ADE Insight — BS EN 22041")
+            self.brand_subtitle.setText(
+                "Test results analyser for report-ready outputs (BS EN 22041)"
+            )
+        elif is_temp:
+            self.setWindowTitle("ADE Insight — Temperature analysis")
+            self.brand_subtitle.setText("Standalone temperature and humidity analysis")
+        else:
+            self.setWindowTitle("ADE Insight — Electrical analysis")
+            self.brand_subtitle.setText("Standalone electrical and compressor cycling analysis")
 
     # ---------------------------
     # Auto test-start helper methods (RESTORED as real methods)
@@ -778,11 +817,35 @@ class MainWindow(QMainWindow):
 
     def _format_summary_text(self, summary: dict[str, Any]) -> str:
         lines: list[str] = []
-        lines.append("ADE Insight — BS EN 22041")
+        analysis_type = summary.get("analysis_type") or "bsen22041"
+        title = {
+            "temperature": "ADE Insight — Temperature analysis",
+            "electrical": "ADE Insight — Electrical analysis",
+        }.get(str(analysis_type), "ADE Insight — BS EN 22041")
+        lines.append(title)
         lines.append("")
-        lines.append(f"Test start: {summary.get('test_start', '')}")
+        if summary.get("input_file"):
+            lines.append(f"Input: {summary.get('input_file', '')}")
+        if summary.get("test_start"):
+            lines.append(f"Test start: {summary.get('test_start', '')}")
         lines.append(f"Timezone: {summary.get('tz', '')}")
-        lines.append(f"Resample: {summary.get('resample_seconds', '')} s")
+        if summary.get("resample_seconds"):
+            lines.append(f"Resample: {summary.get('resample_seconds', '')} s")
+        time_payload = summary.get("time") or {}
+        if isinstance(time_payload, dict) and time_payload:
+            lines.append(f"Start: {time_payload.get('start', '')}")
+            lines.append(f"End: {time_payload.get('end', '')}")
+            lines.append(f"Duration (h): {time_payload.get('duration_hours', '')}")
+        if analysis_type == "temperature":
+            overall = summary.get("overall") or {}
+            cols = (summary.get("columns") or {}).get("selected_probes", [])
+            lines.append("")
+            lines.append("Temperature")
+            lines.append(f"- Selected probes: {', '.join(cols) if cols else ''}")
+            lines.append(f"- Min (°C): {overall.get('min', '')}")
+            lines.append(f"- Mean (°C): {overall.get('mean', '')}")
+            lines.append(f"- Max (°C): {overall.get('max', '')}")
+            return "\n".join(lines)
         lines.append("")
 
         designation = summary.get("test_designation") or ""
@@ -807,7 +870,10 @@ class MainWindow(QMainWindow):
 
         pr = summary.get("power_results", {}) or {}
         if pr:
-            lines.append("Electrical (test_last_24h)")
+            heading = (
+                "Electrical" if analysis_type == "electrical" else "Electrical (test_last_24h)"
+            )
+            lines.append(heading)
             lines.append(f"- kWh/day: {pr.get('kwh_per_day', '')}")
             lines.append(f"- Mean power ON (W): {pr.get('mean_power_on_w', '')}")
             lines.append(f"- Mean power OFF (W): {pr.get('mean_power_off_w', '')}")
@@ -818,6 +884,12 @@ class MainWindow(QMainWindow):
             lines.append(f"- Mean PF: {pr.get('mean_power_factor', '')}")
             lines.append(f"- Mean PF ON: {pr.get('mean_power_factor_on', '')}")
             lines.append(f"- Mean PF OFF: {pr.get('mean_power_factor_off', '')}")
+            cycles = summary.get("cycle_stats") or {}
+            if isinstance(cycles, dict) and cycles:
+                lines.append(f"- Starts: {cycles.get('starts', '')}")
+                lines.append(f"- Starts/hour: {cycles.get('starts_per_hour', '')}")
+                lines.append(f"- Mean ON time (s): {cycles.get('mean_on_seconds', '')}")
+                lines.append(f"- Mean OFF time (s): {cycles.get('mean_off_seconds', '')}")
             lines.append("")
 
         ag = summary.get("ambient_gradient", None)
@@ -843,6 +915,9 @@ class MainWindow(QMainWindow):
 
     def _populate_qc_table(self, summary: dict[str, Any] | None, qc: dict[str, Any] | None) -> None:
         self.qc_table.setRowCount(0)
+
+        if summary and summary.get("analysis_type") in {"temperature", "electrical"}:
+            return
 
         temp_missing: dict[str, float] = {}
         power_missing: dict[str, float] = {}
@@ -937,7 +1012,13 @@ class MainWindow(QMainWindow):
 
     def _update_plot_tabs(self, plots: dict[str, str | None]) -> None:
         electrical_keys = {"power", "voltage", "current"}
-        food_keys = {"food_stable", "food_last", "food_stable_mmm", "food_last_mmm"}
+        food_keys = {
+            "food_stable",
+            "food_last",
+            "food_stable_mmm",
+            "food_last_mmm",
+            "probes",
+        }
         ambient_keys = {"ambient"}
 
         def build(keys: set[str]) -> list[tuple[str, Path]]:
@@ -1009,16 +1090,18 @@ class MainWindow(QMainWindow):
         test_start = self.test_start.text().strip()
         tz = self.tz.text().strip()
 
-        if not temp or not Path(temp).exists():
+        mode = self.analysis_mode.currentData() or "bsen22041"
+
+        if mode in {"bsen22041", "temperature"} and (not temp or not Path(temp).exists()):
             QMessageBox.critical(self, "Missing input", "Please select a valid Temp/RH CSV file.")
             return
-        if not power or not Path(power).exists():
+        if mode in {"bsen22041", "electrical"} and (not power or not Path(power).exists()):
             QMessageBox.critical(self, "Missing input", "Please select a valid Power TXT file.")
             return
         if not out_dir:
             QMessageBox.critical(self, "Missing output", "Please specify an output directory.")
             return
-        if not test_start:
+        if mode == "bsen22041" and not test_start:
             QMessageBox.critical(self, "Missing test start", "Please enter test start time.")
             return
         if not tz:
@@ -1049,35 +1132,55 @@ class MainWindow(QMainWindow):
         }
 
         try:
-            self.log_line("Running BS EN 22041 pipeline…")
+            if mode == "temperature":
+                self.log_line("Running standalone temperature analysis…")
+                result = analyse_temperature(
+                    temp_file=Path(temp),
+                    out_dir=Path(out_dir),
+                    tz=tz,
+                    time_base="excel_days",
+                    ambient_temp_col=overrides["ta_col"],
+                    ambient_rh_col=overrides["rh_col"],
+                )
+            elif mode == "electrical":
+                self.log_line("Running standalone electrical analysis…")
+                result = analyse_electrical(
+                    power_file=Path(power),
+                    out_dir=Path(out_dir),
+                    tz=tz,
+                    resample_seconds=int(self.resample_seconds.value()),
+                    compressor_on_threshold_w=float(self.compressor_threshold.value()),
+                )
+            else:
+                self.log_line("Running BS EN 22041 pipeline…")
 
-            product_name = None
-            sel = self.product_combo.currentText().strip()
-            if sel and sel != "(None)":
-                product_name = sel
+                product_name = None
+                sel = self.product_combo.currentText().strip()
+                if sel and sel != "(None)":
+                    product_name = sel
 
-            kwargs: dict[str, Any] = dict(
-                temp_file=Path(temp),
-                power_file=Path(power),
-                test_start=test_start,
-                out_dir=Path(out_dir),
-                tz=tz,
-                resample_seconds=int(self.resample_seconds.value()),
-                compressor_on_threshold_w=float(self.compressor_threshold.value()),
-                coverage_max_missing_percent=float(self.coverage_max_missing_percent.value()),
-                probe_distance_m=float(self.probe_distance_m.value()),
-                **overrides,
-            )
+                kwargs: dict[str, Any] = dict(
+                    temp_file=Path(temp),
+                    power_file=Path(power),
+                    test_start=test_start,
+                    out_dir=Path(out_dir),
+                    tz=tz,
+                    resample_seconds=int(self.resample_seconds.value()),
+                    compressor_on_threshold_w=float(self.compressor_threshold.value()),
+                    coverage_max_missing_percent=float(self.coverage_max_missing_percent.value()),
+                    probe_distance_m=float(self.probe_distance_m.value()),
+                    **overrides,
+                )
 
-            # Backwards compatible: only pass product_name if runner supports it
-            try:
-                sig = inspect.signature(run_bsen22041)
-                if "product_name" in sig.parameters:
-                    kwargs["product_name"] = product_name
-            except Exception:
-                pass
+                # Backwards compatible: only pass product_name if runner supports it
+                try:
+                    sig = inspect.signature(run_bsen22041)
+                    if "product_name" in sig.parameters:
+                        kwargs["product_name"] = product_name
+                except Exception:
+                    pass
 
-            result = run_bsen22041(**kwargs)
+                result = run_bsen22041(**kwargs)
             run_dir = Path(result.run_dir)
             self._last_run_dir = run_dir
 
