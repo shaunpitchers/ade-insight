@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence, Optional
+from typing import Sequence
 
 import pandas as pd
 import matplotlib.pyplot as plt
